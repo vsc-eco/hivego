@@ -1,8 +1,9 @@
 package hivego
 
 import (
-	"encoding/json"
 	"time"
+
+	"github.com/vsc-eco/hivego/utils"
 )
 
 type CustomTime time.Time
@@ -112,17 +113,17 @@ func (ct CustomTime) ToTime() time.Time {
 func (h *HiveRpcNode) GetAccount(accountNames []string) ([]AccountData, error) {
 	params := [][]string{accountNames}
 	var query = hrpcQuery{
-		method: "condenser_api.get_accounts",
+		method: CondenserApiGetAccounts,
 		params: params,
 	}
-	endpoint := h.address
-	res, err := h.rpcExec(endpoint, query)
+
+	res, err := h.CallRaw(query)
 	if err != nil {
 		return nil, err
 	}
-
 	var accountData []AccountData
-	err = json.Unmarshal(res, &accountData)
+	err = utils.Recast(res.Result, &accountData)
+
 	if err != nil {
 		return nil, err
 	}

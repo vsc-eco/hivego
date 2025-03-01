@@ -5,12 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"time"
 
 	"github.com/decred/base58"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/vsc-eco/hivego/utils"
 )
 
 type signingDataFromChain struct {
@@ -26,7 +26,8 @@ func (h *HiveRpcNode) GetSigningData() (signingDataFromChain, error) {
 	}
 
 	var props globalProps
-	err = json.Unmarshal(propsB, &props)
+	//err = json.Unmarshal(propsB, &props)
+	err = utils.Recast(propsB.Result, &props)
 	if err != nil {
 		return signingDataFromChain{}, err
 	}

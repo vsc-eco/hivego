@@ -3,9 +3,16 @@
 At this time, there are only a few functions from the client. More will be added.
 
 ### Example usage:
+see some code in /examples
 create a client:
 ```
-hrpc := hivego.NewHiveRpc("https://api.myHiveBlockchainNode.com")
+hrpc := hivego.NewHiveClient(1, "https://api.hive.blog")
+	
+```
+
+get account info:
+```
+r, err := hrpc.GetAccount([]string{"megabytee"})
 ```
 
 submit a custom json tx:
