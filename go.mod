@@ -1,6 +1,6 @@
 module github.com/vsc-eco/hivego
 
-go 1.17
+go 1.24
 
 require (
 	github.com/cfoxon/jsonrpc2client v0.0.0-20220410030230-4f361e74821a
