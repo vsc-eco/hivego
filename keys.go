@@ -39,6 +39,11 @@ func KeyPairFromBytes(privKey []byte) *KeyPair {
 
 // Decodes a base58 Hive public key to secp256k1 public key
 func DecodePublicKey(pubKey string) (*secp256k1.PublicKey, error) {
+	// guard against empty or too-short input
+	if len(pubKey) < len(PublicKeyPrefix) {
+		return nil, errors.New("public key too short")
+	}
+
 	// check prefix matches
 	if pubKey[:len(PublicKeyPrefix)] != PublicKeyPrefix {
 		return nil, errors.New("invalid prefix")

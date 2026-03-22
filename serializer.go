@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,7 +61,9 @@ func appendVString(s string, b *bytes.Buffer) *bytes.Buffer {
 }
 
 func appendVStringArray(a []string, b *bytes.Buffer) *bytes.Buffer {
-	b.Write([]byte{byte(len(a))})
+	vBuf := make([]byte, 5)
+	vLen := binary.PutUvarint(vBuf, uint64(len(a)))
+	b.Write(vBuf[0:vLen])
 	for _, s := range a {
 		appendVString(s, b)
 	}
@@ -119,6 +120,10 @@ func appendVAsset(asset string, b *bytes.Buffer) error {
 	amount, err := strconv.ParseInt(fullNumber, 10, 64)
 	if err != nil {
 		return err
+	}
+
+	if amount < 0 {
+		return errors.New("negative amount not allowed")
 	}
 
 	// Write the amount as int64
@@ -222,7 +227,9 @@ func (o TransferOperation) SerializeOp() ([]byte, error) {
 	transferBuf.Write([]byte{opIdB(o.OpName())})
 	appendVString(o.From, &transferBuf)
 	appendVString(o.To, &transferBuf)
-	appendVAsset(o.Amount, &transferBuf)
+	if err := appendVAsset(o.Amount, &transferBuf); err != nil {
+		return nil, err
+	}
 	appendVString(o.Memo, &transferBuf)
 
 	return transferBuf.Bytes(), nil
@@ -240,15 +247,23 @@ func (a AccountCreateOperation) SerializeOp() ([]byte, error) {
 
 	appendVString(a.Creator, &buf)
 	appendVString(a.NewAccountName, &buf)
-	serializeAuthority(a.Owner, &buf)
-	serializeAuthority(a.Active, &buf)
-	serializeAuthority(a.Posting, &buf)
+	if err = serializeAuthority(a.Owner, &buf); err != nil {
+		return nil, err
+	}
+	if err = serializeAuthority(a.Active, &buf); err != nil {
+		return nil, err
+	}
+	if err = serializeAuthority(a.Posting, &buf); err != nil {
+		return nil, err
+	}
 
 	err = writePublicKey(a.MemoKey, &buf)
 	if err != nil {
 		return nil, err
 	}
 	appendVString(a.JsonMetadata, &buf)
+	// extensions (empty) — required by Hive protocol, same as CreateClaimedAccountOperation
+	buf.WriteByte(extensionsB())
 
 	return buf.Bytes(), nil
 }
@@ -264,9 +279,15 @@ func (a AccountUpdateOperation) SerializeOp() ([]byte, error) {
 
 	// serialize optional authorities (owner, active, posting)
 	// TODO: THIS IS UNTESTED
-	appendOptionalAuthority(a.Owner, &buf)
-	appendOptionalAuthority(a.Active, &buf)
-	appendOptionalAuthority(a.Posting, &buf)
+	if err := appendOptionalAuthority(a.Owner, &buf); err != nil {
+		return nil, err
+	}
+	if err := appendOptionalAuthority(a.Active, &buf); err != nil {
+		return nil, err
+	}
+	if err := appendOptionalAuthority(a.Posting, &buf); err != nil {
+		return nil, err
+	}
 
 	// memo key
 	//
@@ -298,7 +319,9 @@ func (o TransferToSavings) SerializeOp() ([]byte, error) {
 	buf.WriteByte(opIdB(o.OpName()))
 	appendVString(o.From, &buf)
 	appendVString(o.To, &buf)
-	appendVAsset(o.Amount, &buf)
+	if err := appendVAsset(o.Amount, &buf); err != nil {
+		return nil, err
+	}
 	appendVString(o.Memo, &buf)
 
 	return buf.Bytes(), nil
@@ -321,7 +344,9 @@ func (o TransferFromSavings) SerializeOp() ([]byte, error) {
 		return nil, err
 	}
 	appendVString(o.To, &buf)
-	appendVAsset(o.Amount, &buf)
+	if err := appendVAsset(o.Amount, &buf); err != nil {
+		return nil, err
+	}
 	appendVString(o.Memo, &buf)
 
 	return buf.Bytes(), nil
@@ -360,6 +385,74 @@ func (o TransferToVesting) SerializeOp() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// WithdrawVesting (op 4): Account + VestingShares
+// Follows same pattern as TransferToVesting
+func (o WithdrawVestingOperation) SerializeOp() ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte(opIdB(o.OpName()))
+	appendVString(o.Account, &buf)
+	err := appendVAsset(o.VestingShares, &buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// DelegateVestingShares (op 40): Delegator + Delegatee + VestingShares
+func (o DelegateVestingSharesOperation) SerializeOp() ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte(opIdB(o.OpName()))
+	appendVString(o.Delegator, &buf)
+	appendVString(o.Delegatee, &buf)
+	err := appendVAsset(o.VestingShares, &buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// AccountWitnessProxy (op 13): Account + Proxy
+// Follows same pattern as voteOperation (simple string fields)
+func (o AccountWitnessProxyOperation) SerializeOp() ([]byte, error) {
+	var buf bytes.Buffer
+	buf.WriteByte(opIdB(o.OpName()))
+	appendVString(o.Account, &buf)
+	appendVString(o.Proxy, &buf)
+	return buf.Bytes(), nil
+}
+
+// CreateClaimedAccount (op 23): Same as AccountCreate but without Fee field
+// Creator + NewAccountName + Owner + Active + Posting + MemoKey + JsonMetadata + Extensions
+//
+// NOTE(C2): The Extensions field is present in JSON but only serialized as a zero byte
+// (empty extensions) in binary. Non-empty extensions are not supported by this serializer.
+func (o CreateClaimedAccountOperation) SerializeOp() ([]byte, error) {
+	if len(o.Extensions) > 0 {
+		return nil, errors.New("non-empty extensions not supported in binary serialization")
+	}
+	var buf bytes.Buffer
+	buf.WriteByte(opIdB(o.OpName()))
+	appendVString(o.Creator, &buf)
+	appendVString(o.NewAccountName, &buf)
+	if err := serializeAuthority(o.Owner, &buf); err != nil {
+		return nil, err
+	}
+	if err := serializeAuthority(o.Active, &buf); err != nil {
+		return nil, err
+	}
+	if err := serializeAuthority(o.Posting, &buf); err != nil {
+		return nil, err
+	}
+	err := writePublicKey(o.MemoKey, &buf)
+	if err != nil {
+		return nil, err
+	}
+	appendVString(o.JsonMetadata, &buf)
+	// extensions (empty)
+	buf.WriteByte(extensionsB())
+	return buf.Bytes(), nil
+}
+
 func (o ClaimAccountOperation) SerializeOp() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteByte(opIdB(o.OpName()))
@@ -375,13 +468,13 @@ func (o ClaimAccountOperation) SerializeOp() ([]byte, error) {
 }
 
 // todo: UNTESTED
-func appendOptionalAuthority(auth *Auths, buf *bytes.Buffer) {
+func appendOptionalAuthority(auth *Auths, buf *bytes.Buffer) error {
 	if auth != nil {
 		buf.WriteByte(1) // field is present, so we prepend a 1
-		serializeAuthority(*auth, buf)
-	} else {
-		buf.WriteByte(0) // field is absent, so we write a 0
+		return serializeAuthority(*auth, buf)
 	}
+	buf.WriteByte(0) // field is absent, so we write a 0
+	return nil
 }
 
 // todo: UNTESTED
@@ -407,43 +500,50 @@ func WriteVarint(w io.Writer, x int64) error {
 }
 
 // todo: UNTESTED
-func serializeAuthority(auth Auths, buf *bytes.Buffer) {
+func serializeAuthority(auth Auths, buf *bytes.Buffer) error {
 	// write weight_threshold
 	err := binary.Write(buf, binary.LittleEndian, uint32(auth.WeightThreshold))
 	if err != nil {
-		fmt.Printf("Error writing weight_threshold: %v\n", err)
-		return
+		return fmt.Errorf("error writing weight_threshold: %w", err)
 	}
 
 	// write account_auths
 	err = WriteUvarint(buf, uint64(len(auth.AccountAuths)))
 	if err != nil {
-		log.Printf("error writing account_auths length: %v\n", err)
-		return
+		return fmt.Errorf("error writing account_auths length: %w", err)
 	}
 	for _, accountAuth := range auth.AccountAuths {
 		appendVString(accountAuth[0].(string), buf)
-		err = binary.Write(buf, binary.LittleEndian, uint16(accountAuth[1].(int)))
+		weight, err := toUint16(accountAuth[1])
 		if err != nil {
-			log.Printf("error writing account_auth weight: %v\n", err)
-			return
+			return fmt.Errorf("error converting account_auth weight: %w", err)
+		}
+		err = binary.Write(buf, binary.LittleEndian, weight)
+		if err != nil {
+			return fmt.Errorf("error writing account_auth weight: %w", err)
 		}
 	}
 
 	// write key_auths
 	err = WriteUvarint(buf, uint64(len(auth.KeyAuths)))
 	if err != nil {
-		log.Printf("error writing key_auths length: %v\n", err)
-		return
+		return fmt.Errorf("error writing key_auths length: %w", err)
 	}
 	for _, keyAuth := range sortKeyAuth(auth.KeyAuths) {
-		writePublicKey(keyAuth[0].(string), buf)
-		err = binary.Write(buf, binary.LittleEndian, uint16(keyAuth[1].(int)))
+		err = writePublicKey(keyAuth[0].(string), buf)
 		if err != nil {
-			log.Printf("error writing key_auth weight: %v\n", err)
-			return
+			return fmt.Errorf("error writing key_auth public key: %w", err)
+		}
+		weight, err := toUint16(keyAuth[1])
+		if err != nil {
+			return fmt.Errorf("error converting key_auth weight: %w", err)
+		}
+		err = binary.Write(buf, binary.LittleEndian, weight)
+		if err != nil {
+			return fmt.Errorf("error writing key_auth weight: %w", err)
 		}
 	}
+	return nil
 }
 
 func writePublicKey(pub string, buf *bytes.Buffer) error {
@@ -451,13 +551,29 @@ func writePublicKey(pub string, buf *bytes.Buffer) error {
 	if err != nil {
 		return err
 	}
-	binary.Write(buf, binary.LittleEndian, pk.SerializeCompressed())
-	return nil
+	return binary.Write(buf, binary.LittleEndian, pk.SerializeCompressed())
+}
+
+// toUint16 safely converts an interface{} value to uint16.
+// Handles both int (from Go code) and float64 (from JSON unmarshal).
+func toUint16(v interface{}) (uint16, error) {
+	switch val := v.(type) {
+	case int:
+		return uint16(val), nil
+	case float64:
+		return uint16(val), nil
+	case int64:
+		return uint16(val), nil
+	default:
+		return 0, fmt.Errorf("unsupported weight type: %T", v)
+	}
 }
 
 func sortKeyAuth(auths [][2]interface{}) [][2]interface{} {
-	sort.Slice(auths, func(i, j int) bool {
-		return auths[i][0].(string) < auths[j][0].(string)
+	copied := make([][2]interface{}, len(auths))
+	copy(copied, auths)
+	sort.Slice(copied, func(i, j int) bool {
+		return copied[i][0].(string) < copied[j][0].(string)
 	})
-	return auths
+	return copied
 }

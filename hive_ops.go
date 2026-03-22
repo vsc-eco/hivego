@@ -193,6 +193,60 @@ func (h *HiveRpcNode) ClaimRewards(Account string, wif *string) (string, error) 
 
 }
 
+// WithdrawVesting (op 4): Power down — converts VESTS back to HIVE over 13 weeks
+// ref: https://developers.hive.io/apidefinitions/#broadcast_ops_withdraw_vesting
+type WithdrawVestingOperation struct {
+	Account       string `json:"account"`
+	VestingShares string `json:"vesting_shares"`
+}
+
+func (o WithdrawVestingOperation) OpName() string {
+	return "withdraw_vesting"
+}
+
+// DelegateVestingShares (op 40): Delegate HP to another account for curation
+// Set VestingShares to "0.000000 VESTS" to undelegate
+// ref: https://developers.hive.io/apidefinitions/#broadcast_ops_delegate_vesting_shares
+type DelegateVestingSharesOperation struct {
+	Delegator     string `json:"delegator"`
+	Delegatee     string `json:"delegatee"`
+	VestingShares string `json:"vesting_shares"`
+}
+
+func (o DelegateVestingSharesOperation) OpName() string {
+	return "delegate_vesting_shares"
+}
+
+// AccountWitnessProxy (op 13): Set a proxy for witness and DHF voting
+// Set Proxy to "" to clear the proxy
+// ref: https://developers.hive.io/apidefinitions/#broadcast_ops_account_witness_proxy
+type AccountWitnessProxyOperation struct {
+	Account string `json:"account"`
+	Proxy   string `json:"proxy"`
+}
+
+func (o AccountWitnessProxyOperation) OpName() string {
+	return "account_witness_proxy"
+}
+
+// CreateClaimedAccount (op 23): Create account using a previously claimed account token
+// Same as AccountCreateOperation but fee is zero (uses claim token instead)
+// ref: https://developers.hive.io/apidefinitions/#broadcast_ops_create_claimed_account
+type CreateClaimedAccountOperation struct {
+	Creator        string        `json:"creator"`
+	NewAccountName string        `json:"new_account_name"`
+	Owner          Auths         `json:"owner"`
+	Active         Auths         `json:"active"`
+	Posting        Auths         `json:"posting"`
+	MemoKey        string        `json:"memo_key"`
+	JsonMetadata   string        `json:"json_metadata"`
+	Extensions     []interface{} `json:"extensions"`
+}
+
+func (o CreateClaimedAccountOperation) OpName() string {
+	return "create_claimed_account"
+}
+
 type TransferOperation struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
