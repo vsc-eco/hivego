@@ -61,12 +61,15 @@ func appendVString(s string, b *bytes.Buffer) *bytes.Buffer {
 	return b
 }
 
-func appendVStringArray(a []string, b *bytes.Buffer) *bytes.Buffer {
+func appendVStringArray(a []string, b *bytes.Buffer) error {
+	if len(a) > 255 {
+		return fmt.Errorf("string array length %d exceeds 1-byte max (255)", len(a))
+	}
 	b.Write([]byte{byte(len(a))})
 	for _, s := range a {
 		appendVString(s, b)
 	}
-	return b
+	return nil
 }
 
 func appendVAsset(asset string, b *bytes.Buffer) error {
@@ -109,10 +112,9 @@ func appendVAsset(asset string, b *bytes.Buffer) error {
 		decimalPart = parts[1]
 	}
 	if len(decimalPart) > precision {
-		decimalPart = decimalPart[:precision]
-	} else {
-		decimalPart += strings.Repeat("0", precision-len(decimalPart))
+		return fmt.Errorf("amount %q has more decimal places than precision %d allows for %s", asset, precision, symbol)
 	}
+	decimalPart += strings.Repeat("0", precision-len(decimalPart))
 
 	// Combine whole and decimal parts
 	fullNumber := parts[0] + decimalPart
@@ -184,8 +186,12 @@ func (o voteOperation) SerializeOp() ([]byte, error) {
 func (o CustomJsonOperation) SerializeOp() ([]byte, error) {
 	var jBuf bytes.Buffer
 	jBuf.Write([]byte{opIdB(o.OpName())})
-	appendVStringArray(o.RequiredAuths, &jBuf)
-	appendVStringArray(o.RequiredPostingAuths, &jBuf)
+	if err := appendVStringArray(o.RequiredAuths, &jBuf); err != nil {
+		return nil, err
+	}
+	if err := appendVStringArray(o.RequiredPostingAuths, &jBuf); err != nil {
+		return nil, err
+	}
 	appendVString(o.Id, &jBuf)
 	appendVString(o.Json, &jBuf)
 
@@ -222,7 +228,9 @@ func (o TransferOperation) SerializeOp() ([]byte, error) {
 	transferBuf.Write([]byte{opIdB(o.OpName())})
 	appendVString(o.From, &transferBuf)
 	appendVString(o.To, &transferBuf)
-	appendVAsset(o.Amount, &transferBuf)
+	if err := appendVAsset(o.Amount, &transferBuf); err != nil {
+		return nil, err
+	}
 	appendVString(o.Memo, &transferBuf)
 
 	return transferBuf.Bytes(), nil
@@ -298,7 +306,9 @@ func (o TransferToSavings) SerializeOp() ([]byte, error) {
 	buf.WriteByte(opIdB(o.OpName()))
 	appendVString(o.From, &buf)
 	appendVString(o.To, &buf)
-	appendVAsset(o.Amount, &buf)
+	if err := appendVAsset(o.Amount, &buf); err != nil {
+		return nil, err
+	}
 	appendVString(o.Memo, &buf)
 
 	return buf.Bytes(), nil
@@ -321,7 +331,9 @@ func (o TransferFromSavings) SerializeOp() ([]byte, error) {
 		return nil, err
 	}
 	appendVString(o.To, &buf)
-	appendVAsset(o.Amount, &buf)
+	if err := appendVAsset(o.Amount, &buf); err != nil {
+		return nil, err
+	}
 	appendVString(o.Memo, &buf)
 
 	return buf.Bytes(), nil

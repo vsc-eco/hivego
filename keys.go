@@ -3,6 +3,7 @@ package hivego
 import (
 	"bytes"
 	"errors"
+	"fmt"
 
 	"github.com/decred/base58"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
@@ -24,6 +25,10 @@ func KeyPairFromWif(wif string) (*KeyPair, error) {
 
 	if err != nil {
 		return nil, err
+	}
+
+	if len(privKey) != 32 {
+		return nil, fmt.Errorf("invalid WIF: decoded key is %d bytes, expected 32", len(privKey))
 	}
 
 	prvKey, pubKey := secp256k1.PrivKeyFromBytes(privKey)

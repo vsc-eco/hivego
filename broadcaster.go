@@ -43,6 +43,11 @@ func (t *HiveTransaction) Sign(keyPair KeyPair, chainId ...string) (string, erro
 }
 
 func (t *HiveTransaction) AddSig(sig string) {
+	for _, existing := range t.Signatures {
+		if existing == sig {
+			return
+		}
+	}
 	t.Signatures = append(t.Signatures, sig)
 }
 

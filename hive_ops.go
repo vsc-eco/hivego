@@ -33,7 +33,7 @@ type TransferFromSavings struct {
 	From      string `json:"from"`
 	To        string `json:"to"`
 	Memo      string `json:"memo"`
-	RequestId int    `json:"request_id"`
+	RequestId uint32 `json:"request_id"`
 }
 
 func (o TransferFromSavings) OpName() string {
@@ -53,7 +53,7 @@ func (o TransferToSavings) OpName() string {
 
 type CancelTransferFromSavings struct {
 	From      string `json:"from"`
-	RequestId int    `json:"request_id"`
+	RequestId uint32 `json:"request_id"`
 }
 
 func (o CancelTransferFromSavings) OpName() string {

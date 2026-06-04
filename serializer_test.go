@@ -63,7 +63,10 @@ func TestAppendVString(t *testing.T) {
 
 func TestAppendVStringArray(t *testing.T) {
 	var buf bytes.Buffer
-	got := appendVStringArray([]string{"xeroc", "piston"}, &buf).Bytes()
+	if err := appendVStringArray([]string{"xeroc", "piston"}, &buf); err != nil {
+		t.Fatal("unexpected error:", err)
+	}
+	got := buf.Bytes()
 	expected := []byte{2, 5, 120, 101, 114, 111, 99, 6, 112, 105, 115, 116, 111, 110}
 	if !bytes.Equal(got, expected) {
 		t.Error("Expected", expected, "got", got)
