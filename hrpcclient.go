@@ -212,17 +212,26 @@ func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([][]byte, error) {
 			continue
 		}
 
-		// Check if any response has error or bad data
+		// Check if any response is empty OR carries a per-request JSON-RPC error.
+		// HG-H3: an empty-only check let node-side errors (rejected broadcast,
+		// duplicate tx, etc.) pass as success; inspect each response's error member.
 		hasError := false
+		var batchErr error
 		for _, respBytes := range resps {
 			if len(respBytes) == 0 {
 				hasError = true
+				batchErr = errors.New("empty response(s) received from node")
+				break
+			}
+			if respErr := batchResponseError(respBytes); respErr != nil {
+				hasError = true
+				batchErr = respErr
 				break
 			}
 		}
 		if hasError {
 			if enableLogging {
-				log.Printf("rpcExecBatchFast received empty response(s) from endpoint %s (index %d)", endpoint, index)
+				log.Printf("rpcExecBatchFast rejected response from endpoint %s (index %d): %v", endpoint, index, batchErr)
 			}
 			h.nodeStats[index].failureCount.Add(1)
 			h.updateRollingAvg(index)
@@ -231,7 +240,7 @@ func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([][]byte, error) {
 				nextIndex := (h.currentIndex.Load() + i + 1) % numNodes
 				h.logSwitchingNode(index, nextIndex, numNodes)
 			}
-			lastError = errors.New("empty response(s) received from node")
+			lastError = batchErr
 			continue
 		}
 
