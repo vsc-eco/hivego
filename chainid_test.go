@@ -46,8 +46,14 @@ func TestCustomChainID(t *testing.T) {
 	}
 
 	// Test HashTxForSig with custom chain ID
-	digestCustom := HashTxForSig(message, customChainID)
-	digestDefault := HashTxForSig(message) // Uses default chain ID
+	digestCustom, err := HashTxForSig(message, customChainID)
+	if err != nil {
+		t.Fatalf("HashTxForSig(custom) returned error: %v", err)
+	}
+	digestDefault, err := HashTxForSig(message) // Uses default chain ID
+	if err != nil {
+		t.Fatalf("HashTxForSig(default) returned error: %v", err)
+	}
 
 	// Digests should be different
 	if hex.EncodeToString(digestCustom) == hex.EncodeToString(digestDefault) {

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/decred/base58"
@@ -50,12 +51,20 @@ func (h *HiveRpcNode) GetSigningData() (signingDataFromChain, error) {
 	return signingData, nil
 }
 
-func HashTxForSig(tx []byte, chainID ...string) []byte {
+func HashTxForSig(tx []byte, chainID ...string) ([]byte, error) {
 	var message bytes.Buffer
 
 	// Use custom chain ID if provided, otherwise use default
 	if len(chainID) > 0 && chainID[0] != "" {
-		cid, _ := hex.DecodeString(chainID[0])
+		cid, err := hex.DecodeString(chainID[0])
+		if err != nil {
+			// HG-H6: never silently drop an invalid chain id. The old code
+			// discarded this error, leaving cid empty, so the signing digest was
+			// sha256(tx) with NO chain prefix — identical to the digest for a
+			// different/empty chain. That collision makes a signature produced for
+			// one chain replayable on another. Fail closed instead.
+			return nil, fmt.Errorf("invalid chain id %q: %w", chainID[0], err)
+		}
 		message.Write(cid)
 	} else {
 		message.Write(getHiveChainId())
@@ -65,7 +74,7 @@ func HashTxForSig(tx []byte, chainID ...string) []byte {
 
 	digest := sha256.New()
 	digest.Write(message.Bytes())
-	return digest.Sum(nil)
+	return digest.Sum(nil), nil
 }
 
 func HashTx(tx []byte) []byte {

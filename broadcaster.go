@@ -57,7 +57,10 @@ func (t *HiveTransaction) Sign(keyPair KeyPair, chainId ...string) (string, erro
 		return "", err
 	}
 
-	digest := HashTxForSig(message, chainId...)
+	digest, err := HashTxForSig(message, chainId...)
+	if err != nil {
+		return "", err
+	}
 	sig, err := secp256k1.SignCompact(keyPair.PrivateKey, digest, true)
 	if err != nil {
 		return "", err
@@ -101,7 +104,10 @@ func (h *HiveRpcNode) Broadcast(ops []HiveOperation, wif *string) (string, error
 		return "", err
 	}
 
-	digest := HashTxForSig(message, h.ChainID)
+	digest, err := HashTxForSig(message, h.ChainID)
+	if err != nil {
+		return "", err
+	}
 
 	txId, err := tx.GenerateTrxId()
 	if err != nil {
