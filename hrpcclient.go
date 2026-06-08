@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log"
 	"sync/atomic"
+	"time"
 
 	"github.com/cfoxon/jsonrpc2client"
 )
@@ -24,6 +25,9 @@ type HiveRpcNode struct {
 	MaxBatch     int
 	NoBroadcast  bool
 	ChainID      string
+	// RpcTimeout bounds a single node RPC round-trip (HG-H7). Zero falls back to
+	// defaultRpcTimeout so struct-literal construction is still protected.
+	RpcTimeout time.Duration
 }
 
 type globalProps struct {
@@ -49,6 +53,7 @@ func NewHiveRpcWithOpts(addrs []string, maxConn int, maxBatch int) *HiveRpcNode 
 		nodeStats:    nodeStats,
 		MaxConn:      maxConn,
 		MaxBatch:     maxBatch,
+		RpcTimeout:   defaultRpcTimeout,
 	}
 }
 
@@ -71,7 +76,10 @@ func (h *HiveRpcNode) rpcExec(query hrpcQuery) ([]byte, error) {
 
 		rpcClient := jsonrpc2client.NewClientWithOpts(endpoint, h.MaxConn, h.MaxBatch)
 		jr2query := &jsonrpc2client.RpcRequest{Method: query.method, JsonRpc: "2.0", Id: 1, Params: query.params}
-		resp, err := rpcClient.CallRaw(jr2query)
+		// HG-H7: bound the round-trip so a hung node can't block this goroutine forever.
+		resp, err := callWithTimeout(h.rpcTimeout(), func() (*jsonrpc2client.RpcResponse, error) {
+			return rpcClient.CallRaw(jr2query)
+		})
 		if err != nil {
 			if enableLogging {
 				log.Printf(
@@ -185,7 +193,10 @@ func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([][]byte, error) {
 			jr2queries = append(jr2queries, jr2query)
 		}
 
-		resps, err := rpcClient.CallBatchFast(jr2queries)
+		// HG-H7: bound the batch round-trip so a hung node can't block this goroutine forever.
+		resps, err := callWithTimeout(h.rpcTimeout(), func() ([][]byte, error) {
+			return rpcClient.CallBatchFast(jr2queries)
+		})
 		if err != nil {
 			if enableLogging {
 				log.Printf("rpcExecBatchFast failed for endpoint %s (index %d): %v", endpoint, index, err)
