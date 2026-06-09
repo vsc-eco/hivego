@@ -2,39 +2,56 @@ package hivego
 
 // review8 HG-H7 — the RPC client had no read/write timeout, so a node that
 // accepts the connection but never replies blocked the calling (broadcast)
-// goroutine forever. callWithTimeout bounds each attempt.
+// goroutine forever. Each call now wraps its HTTP request in a context deadline
+// (h.rpcTimeout()), so a hung node is abandoned and the request is cancelled.
 
 import (
-	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
 
-func TestReview8_HGH7_CallWithTimeoutUnblocksOnHang(t *testing.T) {
-	// A call that returns promptly passes its value through untouched.
-	v, err := callWithTimeout(time.Second, func() (int, error) { return 42, nil })
-	if err != nil || v != 42 {
-		t.Fatalf("fast call should pass through, got v=%d err=%v", v, err)
-	}
+func TestReview8_HGH7_CallTimesOutOnHungNode(t *testing.T) {
+	// A server that accepts the connection but never replies — the HG-H7 scenario.
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release // hang until the test releases it
+	}))
+	// LIFO defers: release the handler first so srv.Close() doesn't wait on it.
+	defer srv.Close()
+	defer close(release)
 
-	// An underlying error is propagated.
-	sentinel := errors.New("boom")
-	if _, err := callWithTimeout(time.Second, func() (int, error) { return 0, sentinel }); !errors.Is(err, sentinel) {
-		t.Fatalf("error should propagate, got %v", err)
-	}
+	node := NewHiveRpcWithOpts([]string{srv.URL}, 1, 1)
+	node.RpcTimeout = 100 * time.Millisecond
 
-	// A hung call (never returns within the timeout) returns a timeout error
-	// rather than blocking the caller forever — the core HG-H7 fix.
 	start := time.Now()
-	_, err = callWithTimeout(50*time.Millisecond, func() (int, error) {
-		time.Sleep(5 * time.Second) // simulate a node that accepts but never replies
-		return 1, nil
-	})
+	_, err := node.callRaw(srv.URL, &rpcRequest{Method: "x", JsonRpc: "2.0", Id: 1})
 	if err == nil {
-		t.Fatal("HG-H7: a hung call must time out")
+		t.Fatal("HG-H7: a hung node must produce a timeout error")
 	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("HG-H7: caller should unblock at the timeout (~50ms), waited %s", elapsed)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("HG-H7: caller should unblock near the timeout (~100ms), waited %s", elapsed)
+	}
+}
+
+func TestReview8_HGH7_CallRawSucceeds(t *testing.T) {
+	// A prompt, well-formed response passes through untouched.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+	}))
+	defer srv.Close()
+
+	node := NewHiveRpcWithOpts([]string{srv.URL}, 1, 1)
+	resp, err := node.callRaw(srv.URL, &rpcRequest{Method: "x", JsonRpc: "2.0", Id: 1})
+	if err != nil {
+		t.Fatalf("unexpected transport error: %v", err)
+	}
+	if resp.Error != nil {
+		t.Fatalf("unexpected rpc error: %v", resp.Error)
+	}
+	if len(resp.Result) == 0 {
+		t.Fatal("expected a non-empty result")
 	}
 }
 

@@ -5,8 +5,6 @@ import (
 	"log"
 	"sync/atomic"
 	"time"
-
-	"github.com/cfoxon/jsonrpc2client"
 )
 
 const precisionFactor = 10000 // basis points for precision on rolling average
@@ -71,15 +69,16 @@ func (h *HiveRpcNode) rpcExec(query hrpcQuery) ([]byte, error) {
 	var lastError error
 
 	for i := uint32(0); i < numNodes; i++ {
-		index := h.currentIndex.Add(1) % numNodes
+		// Sticky selection: start at the last-successful node (currentIndex) and
+		// advance only on failure, matching rpcExecBatchFast. currentIndex is set
+		// to the working node via currentIndex.Store on success below.
+		index := (h.currentIndex.Load() + i) % numNodes
 		endpoint := h.addresses[index]
 
-		rpcClient := jsonrpc2client.NewClientWithOpts(endpoint, h.MaxConn, h.MaxBatch)
-		jr2query := &jsonrpc2client.RpcRequest{Method: query.method, JsonRpc: "2.0", Id: 1, Params: query.params}
-		// HG-H7: bound the round-trip so a hung node can't block this goroutine forever.
-		resp, err := callWithTimeout(h.rpcTimeout(), func() (*jsonrpc2client.RpcResponse, error) {
-			return rpcClient.CallRaw(jr2query)
-		})
+		// HG-H7: callRaw bounds the round-trip with a context deadline so a hung
+		// node can't block this goroutine forever.
+		req := &rpcRequest{Method: query.method, JsonRpc: "2.0", Id: 1, Params: query.params}
+		resp, err := h.callRaw(endpoint, req)
 		if err != nil {
 			if enableLogging {
 				log.Printf(
@@ -177,7 +176,7 @@ func (h *HiveRpcNode) logSwitchingNode(currentIndex uint32, nextIndex uint32, nu
 	log.Printf("DEBUG: Switching to node: %s (index %d)", nextEndpoint, nextIndex)
 }
 
-func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([][]byte, error) {
+func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([]byte, error) {
 	numNodes := uint32(len(h.addresses))
 	var lastError error
 
@@ -185,18 +184,14 @@ func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([][]byte, error) {
 		index := (h.currentIndex.Load() + i) % numNodes
 		endpoint := h.addresses[index]
 
-		rpcClient := jsonrpc2client.NewClientWithOpts(endpoint, h.MaxConn, h.MaxBatch)
-
-		var jr2queries jsonrpc2client.RPCRequests
+		var reqs []*rpcRequest
 		for j, query := range queries {
-			jr2query := &jsonrpc2client.RpcRequest{Method: query.method, JsonRpc: "2.0", Id: j, Params: query.params}
-			jr2queries = append(jr2queries, jr2query)
+			reqs = append(reqs, &rpcRequest{Method: query.method, JsonRpc: "2.0", Id: j, Params: query.params})
 		}
 
-		// HG-H7: bound the batch round-trip so a hung node can't block this goroutine forever.
-		resps, err := callWithTimeout(h.rpcTimeout(), func() ([][]byte, error) {
-			return rpcClient.CallBatchFast(jr2queries)
-		})
+		// HG-H7: callBatch bounds the round-trip with a context deadline so a hung
+		// node can't block this goroutine forever.
+		body, err := h.callBatch(endpoint, reqs)
 		if err != nil {
 			if enableLogging {
 				log.Printf("rpcExecBatchFast failed for endpoint %s (index %d): %v", endpoint, index, err)
@@ -212,24 +207,11 @@ func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([][]byte, error) {
 			continue
 		}
 
-		// Check if any response is empty OR carries a per-request JSON-RPC error.
-		// HG-H3: an empty-only check let node-side errors (rejected broadcast,
-		// duplicate tx, etc.) pass as success; inspect each response's error member.
-		hasError := false
-		var batchErr error
-		for _, respBytes := range resps {
-			if len(respBytes) == 0 {
-				hasError = true
-				batchErr = errors.New("empty response(s) received from node")
-				break
-			}
-			if respErr := batchResponseError(respBytes); respErr != nil {
-				hasError = true
-				batchErr = respErr
-				break
-			}
-		}
-		if hasError {
+		// HG-H3: reject an empty body or any per-request JSON-RPC error inside the
+		// batch (rejected broadcast, duplicate tx, missing data, etc.). The old
+		// empty-only check let node-side errors pass as success, so they were then
+		// unmarshalled into an empty result and reported as good data.
+		if batchErr := batchResponseError(body); batchErr != nil {
 			if enableLogging {
 				log.Printf("rpcExecBatchFast rejected response from endpoint %s (index %d): %v", endpoint, index, batchErr)
 			}
@@ -249,9 +231,7 @@ func (h *HiveRpcNode) rpcExecBatchFast(queries []hrpcQuery) ([][]byte, error) {
 		h.updateRollingAvg(index)
 		h.currentIndex.Store(index)
 
-		var batchResult [][]byte
-		batchResult = append(batchResult, resps...)
-		return batchResult, nil
+		return body, nil
 	}
 
 	if lastError != nil {

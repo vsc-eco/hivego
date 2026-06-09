@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/cfoxon/hivego"
 	"github.com/decred/dcrd/dcrec/secp256k1/v2"
+	"github.com/vsc-eco/hivego"
 )
 
 func TestKeyPairFromWif(t *testing.T) {

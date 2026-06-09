@@ -287,7 +287,7 @@ func (h *HiveRpcNode) FetchVirtualOps(blockHeight int, onlyVirtual bool, Include
 		} `json:"result"`
 	}
 
-	err = json.Unmarshal(res[0], &virtualOpResponses)
+	err = json.Unmarshal(res, &virtualOpResponses)
 	if err != nil {
 		return nil, err
 	}
@@ -335,7 +335,7 @@ func (h *HiveRpcNode) fetchBlockInRange(startBlock, count int) ([]Block, error) 
 		} `json:"result"`
 	}
 
-	err = json.Unmarshal(res[0], &blockRangeResponses)
+	err = json.Unmarshal(res, &blockRangeResponses)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +381,7 @@ func (h *HiveRpcNode) fetchBlock(params []getBlockQueryParams) ([]Block, error) 
 		} `json:"result"`
 	}
 
-	err = json.Unmarshal(res[0], &blockResponses)
+	err = json.Unmarshal(res, &blockResponses)
 	if err != nil {
 		return nil, err
 	}
